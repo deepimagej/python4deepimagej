@@ -38,6 +38,15 @@ import xml.etree.ElementTree as ET
 import time
 import numpy as np
 
+import xml.etree.ElementTree as ET
+
+"""
+Download the template from this link: 
+    
+https://raw.githubusercontent.com/esgomezm/python4deepimagej/yaml/yaml/config_template.xml
+
+"""
+
 def write_config(model, test_image, config_path):
     tree = ET.parse('config_template.xml')
     root = tree.getroot()
@@ -54,9 +63,9 @@ def write_config(model, test_image, config_path):
     # ModelTest
     root[1][0].text = test_image.Input_shape
     root[1][1].text = test_image.Output_shape
-    root[1][2].text = tet_image.MemoryPeak
-    root[1][3].text = tet_image.Runtime
-    root[1][4].text = tet_image.PixelSize
+    root[1][2].text = test_image.MemoryPeak
+    root[1][3].text = test_image.Runtime
+    root[1][4].text = test_image.PixelSize
     
     # ModelTag
     root[2][0].text = 'tf.saved_model.tag_constants.SERVING'
@@ -72,46 +81,56 @@ def write_config(model, test_image, config_path):
     root[2][10].text = model.FixedPatch
     root[2][11].text = model.MinimumSize
     root[2][12].text = model.PatchSize
-    root[2][13].text = 'True'
+    root[2][13].text = 'true'
     root[2][14].text = model.Padding
-    root[2][15].text = 'peprocessing.txt'
+    root[2][15].text = 'preprocessing.txt'
     root[2][16].text = 'postprocessing.txt'
     root[2][17].text = '1'
     
     try:
-        tree.write(os.path.join(config_path,'config.xml'))
+        tree.write(os.path.join(config_path,'config.xml'),encoding="UTF-8",xml_declaration=True, )
     except:
         print("The directory {} does not exist.".format(config_path))
 
 class Model:    
     def __init__(self, tf_model):
+        # ModelInformation
+        self.Name = 'null'
+        self.Authors = 'null'
+        self.URL = 'null'
+        self.Credits = 'null'
+        self.Version = 'null'
+        self.References = 'null'
         self.Date = time.ctime()
-        
+
         # ModelTag
+        self.MinimumSize = '32'
+
         input_dim = tf_model.input_shape
         output_dim = tf_model.output_shape
-
         if input_dim[2] is None:
-
-            self.FixedPatch = 'False'
-
+            self.FixedPatch = 'false'
+            self.PatchSize = self.MinimumSize
             if input_dim[-1] is None:
               self.InputOrganization0 = 'NCHW'
+              self.Channels = np.str(input_dim[1])
             else:
-              self.InputOrganization0 = 'NHWC'            
+              self.InputOrganization0 = 'NHWC'
+              self.Channels = np.str(input_dim[-1])
             
             if output_dim[-1] is None:
               self.OutputOrganization0 = 'NCHW'    
             else:
               self.OutputOrganization0 = 'NHWC'
         else:
-            self.FixedPatch = 'True'
-            self.PatchSize = input_dim[2]
-
+            self.FixedPatch = 'true'
+            self.PatchSize = np.str(input_dim[2])
             if input_dim[-1] < input_dim[-2] and input_dim[-1] < input_dim[-3]:
               self.InputOrganization0 = 'NHWC'
+              self.Channels = np.str(input_dim[-1])
             else:
               self.InputOrganization0 = 'NCHW'
+              self.Channels = np.str(input_dim[1])
 
             if output_dim[-1] < output_dim[-2] and output_dim[-1] < output_dim[-3]:
               self.OutputOrganization0 = 'NHWC'
@@ -119,18 +138,17 @@ class Model:
               self.OutputOrganization0 = 'NCHW'
               
         input_dim = np.str(input_dim)
-        input_dim.replace('(', ',')
-        input_dim.replace(')', ',')
-        input_dim.replace('None', '-1')
+        input_dim = input_dim.replace('(', ',')
+        input_dim = input_dim.replace(')', ',')
+        input_dim = input_dim.replace('None', '-1')
+        input_dim = input_dim.replace(' ', "")
         self.InputTensorDimensions = input_dim
-            
-        self.MinimumSize = '32'
-        self.Padding = self._pixel_half_receptive_field(tf_model)
+        self.Padding = np.str(self._pixel_half_receptive_field(tf_model))
         
     def _pixel_half_receptive_field(self, tf_model):
         input_shape = tf_model.input_shape
         
-        if self.FixedPatch == 'False':
+        if self.FixedPatch == 'false':
           min_size = 10*np.int(self.MinimumSize)
           if self.InputOrganization0 == 'NHWC':
             null_im = np.zeros((1, min_size, min_size, input_shape[-1]))
@@ -201,27 +219,15 @@ class TestImage:
 
 
 
-
-
-# # all items data
-# print('\nAll item data:')
-# for elem in root:
-#     for subelem in elem:
-#         print(subelem.text)
-# for elem in root.iter('Name'):
-#     print(elem.text)
-
-
-# for elem in root:
-#     print(elem.find('Name'))
+"""
+Example:
     
-# len(root)
-# modelinformation = root[0]
-# modelinformation.tag
+test_info = TestImage(test_img, output_img,1.6)
+model_info = Model(model)
+model_info.add_author('E. Gomez-de-Mariscal, C. Garcia-Lopez-de-Haro, L. Donati, M. Unser, A. Munoz-Barrutia, D. Sage.')
+model_info.add_name('2D multitask U-Net for cell segmentation')
+model_info.add_credits('Copyright 2019. Universidad Carlos III, Madrid, Spain and EPFL, Lausanne, Switzerland.')
 
-# find(match, namespaces=None)
-
-
-
-
-# https://github.com/bioimage-io/bioimage.io/blob/master/docs/resource-description-file.md#basic-fields
+write_config(model_info, test_info, "DeepImageJ-model")
+    
+"""
