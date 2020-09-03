@@ -37,62 +37,61 @@ import os
 import xml.etree.ElementTree as ET
 import time
 import numpy as np
-
-import xml.etree.ElementTree as ET
+import urllib
+import shutil
+from skimage import io
 
 """
 Download the template from this link: 
-    
-https://raw.githubusercontent.com/esgomezm/python4deepimagej/yaml/yaml/config_template.xml
+    https://raw.githubusercontent.com/esgomezm/python4deepimagej/yaml/yaml/config_template.xml
+TensorFlow library is needed. It is imported later to save the model as a SavedModel protobuffer
 
+Try to check TensorFlow version and read DeepImageJ's compatibility requirements. 
+
+import tensorflow as tf
+tf.__version__
+----------------------------------------------------
+Example:
+----------------------------------------------------
+dij_config = DeepImageJConfig(model)
+# Update model information
+dij_config.Author = authors
+dij_config.Credits = credits
+# Add info about the minimum size in case it is not fixed.
+pooling_steps = 0
+for keras_layer in model.layers:
+if keras_layer.name.startswith('max'):
+  pooling_steps += 1
+dij_config.MinimumSize = np.str(2**(pooling_steps))
+# Add the information about the test image
+dij_config.add_test_info(test_img, test_prediction, PixelSize)
+## Prepare preprocessing file
+path_preprocessing = "PercentileNormalization.ijm"
+urllib.request.urlretrieve("https://raw.githubusercontent.com/deepimagej/imagej-macros/master/PercentileNormalization.ijm", path_preprocessing )
+## Prepare postprocessing file
+path_postprocessing = "8bitBinarize.ijm"
+urllib.request.urlretrieve("https://raw.githubusercontent.com/deepimagej/imagej-macros/master/8bitBinarize.ijm", path_postprocessing )
+## EXPORT THE MODEL
+deepimagej_model_path = os.path.join(QC_model_folder, 'deepimagej')
+dij_config.export_model(model, deepimagej_model_path, preprocessing = path_preprocessing, postprocessing = path_postprocessing)
+----------------------------------------------------
+Example: change one line in an ImageJ macro
+----------------------------------------------------
+## Prepare postprocessing file
+path_postprocessing = "8bitBinarize.ijm"
+urllib.request.urlretrieve("https://raw.githubusercontent.com/deepimagej/imagej-macros/master/8bitBinarize.ijm", path_postprocessing )
+# Modify the threshold in the macro to the chosen threshold
+ijmacro = open(path_postprocessing,"r")  
+list_of_lines = ijmacro. readlines()
+# Line 21 is the one corresponding to the optimal threshold
+list_of_lines[21] = "optimalThreshold = {}\n".format(128)
+ijmacro.close()
+ijmacro = open(path_postprocessing,"w")  
+ijmacro. writelines(list_of_lines)
+ijmacro. close()
 """
 
-def write_config(model, test_image, config_path):
-    tree = ET.parse('config_template.xml')
-    root = tree.getroot()
-    
-    # ModelInformation
-    root[0][0].text = model.Name
-    root[0][1].text = model.Authors
-    root[0][2].text = model.URL
-    root[0][3].text = model.Credits
-    root[0][4].text = model.Version
-    root[0][5].text = model.Date
-    root[0][6].text = model.References
-    
-    # ModelTest
-    root[1][0].text = test_image.Input_shape
-    root[1][1].text = test_image.Output_shape
-    root[1][2].text = test_image.MemoryPeak
-    root[1][3].text = test_image.Runtime
-    root[1][4].text = test_image.PixelSize
-    
-    # ModelTag
-    root[2][0].text = 'tf.saved_model.tag_constants.SERVING'
-    root[2][1].text = 'tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY'
-    root[2][2].text = model.InputTensorDimensions
-    root[2][3].text = '1'
-    root[2][4].text = 'input'
-    root[2][5].text = model.InputOrganization0
-    root[2][6].text = '1'
-    root[2][7].text = 'output'
-    root[2][8].text = model.OutputOrganization0
-    root[2][9].text = model.Channels
-    root[2][10].text = model.FixedPatch
-    root[2][11].text = model.MinimumSize
-    root[2][12].text = model.PatchSize
-    root[2][13].text = 'true'
-    root[2][14].text = model.Padding
-    root[2][15].text = 'preprocessing.txt'
-    root[2][16].text = 'postprocessing.txt'
-    root[2][17].text = '1'
-    
-    try:
-        tree.write(os.path.join(config_path,'config.xml'),encoding="UTF-8",xml_declaration=True, )
-    except:
-        print("The directory {} does not exist.".format(config_path))
-
-class Model:    
+class DeepImageJConfig:
     def __init__(self, tf_model):
         # ModelInformation
         self.Name = 'null'
@@ -102,132 +101,275 @@ class Model:
         self.Version = 'null'
         self.References = 'null'
         self.Date = time.ctime()
+        # Same value as 2**pooling_steps
+        # (related to encoder-decoder archtiectures) when the input size is not
+        # fixed
+        self.MinimumSize = '8'
+        self.get_dimensions(tf_model)
+        # Receptive field of the network to process input
+        self.Padding = np.str(self._pixel_half_receptive_field(tf_model))
 
-        # ModelTag
-        self.MinimumSize = '32'
-
+    def get_dimensions(self, tf_model):
+        """
+        Calculates the array organization and shapes of inputs and outputs.
+        """
         input_dim = tf_model.input_shape
         output_dim = tf_model.output_shape
+        # Deal with the order of the dimensions and whether the size is fixed
+        # or not
         if input_dim[2] is None:
             self.FixedPatch = 'false'
             self.PatchSize = self.MinimumSize
             if input_dim[-1] is None:
-              self.InputOrganization0 = 'NCHW'
-              self.Channels = np.str(input_dim[1])
+                self.InputOrganization0 = 'NCHW'
+                self.Channels = np.str(input_dim[1])
             else:
-              self.InputOrganization0 = 'NHWC'
-              self.Channels = np.str(input_dim[-1])
-            
+                self.InputOrganization0 = 'NHWC'
+                self.Channels = np.str(input_dim[-1])
+
             if output_dim[-1] is None:
-              self.OutputOrganization0 = 'NCHW'    
+                self.OutputOrganization0 = 'NCHW'
             else:
-              self.OutputOrganization0 = 'NHWC'
+                self.OutputOrganization0 = 'NHWC'
         else:
             self.FixedPatch = 'true'
             self.PatchSize = np.str(input_dim[2])
+
             if input_dim[-1] < input_dim[-2] and input_dim[-1] < input_dim[-3]:
-              self.InputOrganization0 = 'NHWC'
-              self.Channels = np.str(input_dim[-1])
+                self.InputOrganization0 = 'NHWC'
+                self.Channels = np.str(input_dim[-1])
             else:
-              self.InputOrganization0 = 'NCHW'
-              self.Channels = np.str(input_dim[1])
+                self.InputOrganization0 = 'NCHW'
+                self.Channels = np.str(input_dim[1])
 
             if output_dim[-1] < output_dim[-2] and output_dim[-1] < output_dim[-3]:
-              self.OutputOrganization0 = 'NHWC'
+                self.OutputOrganization0 = 'NHWC'
             else:
-              self.OutputOrganization0 = 'NCHW'
-              
+                self.OutputOrganization0 = 'NCHW'
+
+        # Adapt the format from brackets to parenthesis
         input_dim = np.str(input_dim)
         input_dim = input_dim.replace('(', ',')
         input_dim = input_dim.replace(')', ',')
         input_dim = input_dim.replace('None', '-1')
         input_dim = input_dim.replace(' ', "")
         self.InputTensorDimensions = input_dim
-        self.Padding = np.str(self._pixel_half_receptive_field(tf_model))
-        
+
     def _pixel_half_receptive_field(self, tf_model):
+        """
+        The halo is equivalent to the receptive field of one pixel. This value
+        is used for image reconstruction when a entire image is processed.
+        """
         input_shape = tf_model.input_shape
-        
+
         if self.FixedPatch == 'false':
-          min_size = 10*np.int(self.MinimumSize)
-          if self.InputOrganization0 == 'NHWC':
-            null_im = np.zeros((1, min_size, min_size, input_shape[-1]))
-          else:
-            null_im = np.zeros((1, input_shape[1], min_size, min_size))
+            min_size = 50 * np.int(self.MinimumSize)
+
+            if self.InputOrganization0 == 'NHWC':
+                null_im = np.zeros((1, min_size, min_size, input_shape[-1]))
+            else:
+                null_im = np.zeros((1, input_shape[1], min_size, min_size))
         else:
-          null_im = np.zeros((1, input_shape[1:]))
-          min_size = np.int(self.MinimumSize)
+            null_im = np.zeros((input_shape[1:]))
+            null_im = np.expand_dims(null_im, axis=0)
+            min_size = np.int(self.MinimumSize)
 
         point_im = np.zeros_like(null_im)
-        min_size = np.int(min_size/2)
+        min_size = np.int(min_size / 2)
+
         if self.InputOrganization0 == 'NHWC':
-            point_im[0,min_size,min_size] = 1
+            point_im[0, min_size, min_size] = 1
         else:
-            point_im[0,:,min_size,min_size] = 1
+            point_im[0, :, min_size, min_size] = 1
+
         result_unit = tf_model.predict(np.concatenate((null_im, point_im)))
-        D = np.abs(result_unit[0]-result_unit[1])>0
+
+        D = np.abs(result_unit[0] - result_unit[1]) > 0
+
         if self.InputOrganization0 == 'NHWC':
-            D = D[:,:,0]
+            D = D[:, :, 0]
         else:
-            D = D[0,:,:]
-        ind = np.where(D[:min_size,:min_size]==1)
+            D = D[0, :, :]
+
+        ind = np.where(D[:min_size, :min_size] == 1)
         halo = np.min(ind[1])
-        halo = min_size-halo+1
+        halo = min_size - halo + 1
+
         return halo
-    
-    # ModelInformation    
-    def add_name(self, text):
-        self.Name = text
-        
-    def add_author(self, text):
-        self.Authors = text
-        
-    def add_url(self, text):
-        self.URL = text
-        
-    def add_credits(self, text):
-        self.Credits = text
-        
-    def add_version(self, text):
-        self.Version = text
-        
-    def add_date(self, text):
-        self.Date = text
-        
-    def add_references(self, text):
-        self.References = text
-    
-    # ModelTag
-    def add_channels(self, text):
-        self.Channels = text
-    
-    def add_min_size(self, text):
-        self.MinimumSize = text
-        
-    
-class TestImage:
-    
-    def __init__(self, input_im, output_im, pixel_size):
+
+    class TestImage:
+        def __add__(self, input_im, output_im, pixel_size):
+            """
+            pixel size must be given in microns
+            """
+            self.Input_shape = '{0}x{1}'.format(input_im.shape[0], input_im.shape[1])
+            self.InputImage = input_im
+            self.Output_shape = '{0}x{1}'.format(output_im.shape[0], output_im.shape[1])
+            self.OutputImage = output_im
+            self.MemoryPeak = ''
+            self.Runtime = ''
+            self.PixelSize = '{0}µmx{1}µm'.format(pixel_size, pixel_size)
+
+    def add_test_info(self, input_im, output_im, pixel_size):
+        self.test_info = self.TestImage()
+        self.test_info.__add__(input_im, output_im, pixel_size)
+
+    def export_model(self, tf_model, deepimagej_model_path, **kwargs):
         """
-        pixel size must be given in microns
+        Main function to export the model as a bundled model of DeepImageJ
         """
-        self.Input_shape = '{0}x{1}'.format(input_im.shape[0], input_im.shape[1])
-        self.Output_shape = '{0}x{1}'.format(output_im.shape[0], output_im.shape[1])
-        self.MemoryPeak = ''
-        self.Runtime = ''
-        self.PixelSize = '{0}µmx{1}µm'.format(pixel_size, pixel_size)
+        # Save the mode as protobuffer
+        self.save_tensorflow_pb(tf_model, deepimagej_model_path)
+
+        # extract the information about the testing image
+        test_info = self.test_info
+        io.imsave(os.path.join(deepimagej_model_path, 'exampleImage.tiff'), self.test_info.InputImage)
+        io.imsave(os.path.join(deepimagej_model_path, 'resultImage.tiff'), self.test_info.OutputImage)
+        print("Example images stored.")
+
+        # write the DeepImageJ configuration as an xml file
+        write_config(self, test_info, deepimagej_model_path)
+
+        # store pre and post processing ImageJ macros
+        pre_path = kwargs.get('preprocessing', None)
+        if pre_path is not None:
+            # copy IJ macro with a new name in deepimagej's folder
+            file_extension = pre_path.split('.')[-1]
+            pre_name = 'preprocessing.{0}'.format(file_extension)
+            shutil.copy2(pre_path, os.path.join(deepimagej_model_path, pre_name))
+            print("ImageJ macro preprocessing included.")
+
+        post_path = kwargs.get('postprocessing', None)
+        if post_path is not None:
+            # copy IJ macro with a new name in deepimagej's folder
+            file_extension = post_path.split('.')[-1]
+            post_name = 'postprocessing.{0}'.format(file_extension)
+            shutil.copy2(post_path, os.path.join(deepimagej_model_path, post_name))
+            print("ImageJ macro postprocessing included.")
+
+        # Zip the bundled model to download
+        shutil.make_archive(deepimagej_model_path, 'zip', deepimagej_model_path)
+        print(
+            "DeepImageJ model was successfully exported as {0}.zip. You can download and start using it in DeepImageJ.".format(
+                deepimagej_model_path))
+
+    def save_tensorflow_pb(self, tf_model, deepimagej_model_path):
+        # Check whether the folder to save the DeepImageJ bundled model exists.
+        # If so, it needs to be removed (TensorFlow requirements)
+        # -------------- Other definitions -----------
+        W = '\033[0m'  # white (normal)
+        R = '\033[31m'  # red
+        if os.path.exists(deepimagej_model_path):
+            print(R + '!! WARNING: DeepImageJ model folder already existed and has been removed !!' + W)
+            shutil.rmtree(deepimagej_model_path)
+
+        import tensorflow as tf
+        TF_VERSION = tf.__version__
+        print("DeepImageJ model will be exported using TensorFlow version {0}".format(TF_VERSION))
+        if TF_VERSION[:3] == "2.3":
+            print(
+                R + "DeepImageJ plugin is only compatible with TensorFlow version 1.x, 2.0.0, 2.1.0 and 2.2.0. Later versions are not suported in DeepImageJ." + W)
+
+        def _save_model():
+            if tf_version == 2:
+                """TODO: change once TF 2.3.0 is available in JAVA"""
+                from tensorflow.compat.v1 import saved_model
+                from tensorflow.compat.v1.keras.backend import get_session
+            else:
+                from tensorflow import saved_model
+                from keras.backend import get_session
+
+            builder = saved_model.builder.SavedModelBuilder(deepimagej_model_path)
+
+            signature = saved_model.signature_def_utils.predict_signature_def(
+                inputs={'input': tf_model.input},
+                outputs={'output': tf_model.output})
+
+            signature_def_map = {saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: signature}
+
+            builder.add_meta_graph_and_variables(get_session(),
+                                                 [saved_model.tag_constants.SERVING],
+                                                 signature_def_map=signature_def_map)
+            builder.save()
+            print("TensorFlow model exported to {0}".format(deepimagej_model_path))
+
+        if TF_VERSION[0] == '1':
+            tf_version = 1
+            _save_model()
+        else:
+            tf_version = 2
+            """TODO: change once TF 2.3.0 is available in JAVA"""
+            from tensorflow.keras.models import clone_model
+            _weights = tf_model.get_weights(tf_model)
+            with tf.Graph().as_default():
+                # clone model in new graph and set weights
+                _model = clone_model(tf_model)
+                _model.set_weights(_weights)
+                _save_model()
 
 
+def write_config(Config, TestInfo, config_path):
+    """
+    - Config:       Class with all the information about the model's architecture and pre/post-processing
+    - TestInfo:   Metadata of the image provided as an example
+    - config_path:  path to the template of the configuration file.
 
-"""
-Example:
-    
-test_info = TestImage(test_img, output_img,1.6)
-model_info = Model(model)
-model_info.add_author('E. Gomez-de-Mariscal, C. Garcia-Lopez-de-Haro, L. Donati, M. Unser, A. Munoz-Barrutia, D. Sage.')
-model_info.add_name('2D multitask U-Net for cell segmentation')
-model_info.add_credits('Copyright 2019. Universidad Carlos III, Madrid, Spain and EPFL, Lausanne, Switzerland.')
+    It can be downloaded from:
+      https://raw.githubusercontent.com/deepimagej/python4deepimagej/blob/master/xml/config_template.xml
 
-write_config(model_info, test_info, "DeepImageJ-model")
-    
-"""
+    The function updates the fields in the template provided with the
+    information about the model and the example image.
+
+    """
+    urllib.request.urlretrieve(
+        "https://raw.githubusercontent.com/deepimagej/python4deepimagej/master/xml/config_template.xml",
+        "config_template.xml")
+
+    import xml.etree.ElementTree as ET
+    try:
+        tree = ET.parse('config_template.xml')
+        root = tree.getroot()
+    except:
+        print("config_template.xml not found.")
+
+    # WorkCitation-Credits
+    root[0][0].text = Config.Name
+    root[0][1].text = Config.Authors
+    root[0][2].text = Config.URL
+    root[0][3].text = Config.Credits
+    root[0][4].text = Config.Version
+    root[0][5].text = Config.Date
+    root[0][6].text = Config.References
+
+    # ExampleImage
+    root[1][0].text = TestInfo.Input_shape
+    root[1][1].text = TestInfo.Output_shape
+    root[1][2].text = TestInfo.MemoryPeak
+    root[1][3].text = TestInfo.Runtime
+    root[1][4].text = TestInfo.PixelSize
+
+    # ModelArchitecture
+    root[2][0].text = 'tf.saved_model.tag_constants.SERVING'
+    root[2][1].text = 'tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY'
+    root[2][2].text = Config.InputTensorDimensions
+    root[2][3].text = '1'
+    root[2][4].text = 'input'
+    root[2][5].text = Config.InputOrganization0
+    root[2][6].text = '1'
+    root[2][7].text = 'output'
+    root[2][8].text = Config.OutputOrganization0
+    root[2][9].text = Config.Channels
+    root[2][10].text = Config.FixedPatch
+    root[2][11].text = Config.MinimumSize
+    root[2][12].text = Config.PatchSize
+    root[2][13].text = 'true'
+    root[2][14].text = Config.Padding
+    root[2][15].text = 'preprocessing.ijm'  # 'preprocessing.txt'
+    root[2][16].text = 'postprocessing.ijm'  # 'postprocessing.txt'
+    root[2][17].text = '1'
+
+    try:
+        tree.write(os.path.join(config_path, 'config.xml'), encoding="UTF-8", xml_declaration=True, )
+        print("DeepImageJ configuration file exported.")
+    except:
+        print("The directory {} does not exist.".format(config_path))
