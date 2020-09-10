@@ -14,7 +14,7 @@
         <OutputSize></OutputSize>
         <MemoryPeak></MemoryPeak>
         <Runtime></Runtime>
-		<PixelSize></PixelSize>
+	<PixelSize></PixelSize>
     </ModelTest>
     <ModelCharacteristics>
         <ModelTag></ModelTag>
