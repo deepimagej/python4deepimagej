@@ -405,7 +405,7 @@ def write_config(Config, TestInfo, config_path):
     root[2][15].text = Config.Preprocessing[0]
     print("Preprocessing macro '{}' set by default".format(Config.Preprocessing[0]))
     root[2][16].text = Config.Postprocessing[0]
-    print("Postprocessing macro '{}' set by default".format(Config.Preprocessing[0]))
+    print("Postprocessing macro '{}' set by default".format(Config.Postprocessing[0]))
     root[2][17].text = '1'    
     try:
         tree.write(os.path.join(config_path,'config.xml'),encoding="UTF-8",xml_declaration=True, )
