@@ -220,8 +220,8 @@ class DeepImageJConfig:
             self.InputImage = input_im
             self.Output_shape = '{0}x{1}'.format(output_im.shape[0], output_im.shape[1])
             self.OutputImage = output_im
-            self.MemoryPeak = ''
-            self.Runtime = ''
+            self.MemoryPeak = 'null'
+            self.Runtime = 'null'
             self.PixelSize = '{0}µmx{1}µm'.format(pixel_size, pixel_size)
 
     def add_test_info(self, input_im, output_im, pixel_size):
