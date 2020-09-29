@@ -55,7 +55,7 @@ Example:
 ----------------------------------------------------
 dij_config = DeepImageJConfig(model)
 # Update model information
-dij_config.Author = authors
+dij_config.Authors = authors
 dij_config.Credits = credits
 
 # Add info about the minimum size in case it is not fixed.
