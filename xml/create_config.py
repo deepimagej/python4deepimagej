@@ -180,11 +180,14 @@ class DeepImageJConfig:
           min_size = 50*np.int(self.MinimumSize)
 
           if self.InputOrganization0 == 'NHWC':
-            null_im = np.zeros((1, min_size, min_size, input_shape[-1]))
+            null_im = np.zeros((1, min_size, min_size, input_shape[-1])
+                                , dtype=np.float32)
           else:
-            null_im = np.zeros((1, input_shape[1], min_size, min_size))
+            null_im = np.zeros((1, input_shape[1], min_size, min_size)
+                                , dtype=np.float32)
         else:
-          null_im   = np.zeros((input_shape[1:]))
+          null_im   = np.zeros((input_shape[1:])
+                                , dtype=np.float32)
           null_im   = np.expand_dims(null_im, axis=0)
           min_size  = np.int(self.MinimumSize)
 
@@ -272,24 +275,10 @@ class DeepImageJConfig:
         for i in range(len(self.Preprocessing)):
           shutil.copy2(self.Preprocessing_files[i], os.path.join(deepimagej_model_path, self.Preprocessing[i]))
           print("ImageJ macro {} included in the bundled model.".format(self.Preprocessing[i]))
-        # # store pre and post processing ImageJ macros
-        # pre_path = kwargs.get('preprocessing', None)
-        # if pre_path is not None:
-        #     # copy IJ macro in deepimagej's folder
-        #     file_extension = pre_path.split('.')[-1]
-        #     pre_name = 'preprocessing.{0}'.format(file_extension)
-        #     shutil.copy2(pre_path, os.path.join(deepimagej_model_path, pre_name))
-        #     print("ImageJ macro preprocessing included.")
+
         for i in range(len(self.Postprocessing)):
           shutil.copy2(self.Postprocessing_files[i], os.path.join(deepimagej_model_path, self.Postprocessing[i]))
           print("ImageJ macro {} included in the bundled model.".format(self.Postprocessing[i]))
-        # post_path = kwargs.get('postprocessing', None)
-        # if post_path is not None:
-        #     # copy IJ macro in deepimagej's folder
-        #     file_extension = post_path.split('.')[-1]
-        #     post_name = 'postprocessing.{0}'.format(file_extension)
-        #     shutil.copy2(post_path, os.path.join(deepimagej_model_path, post_name))
-        #     print("ImageJ macro postprocessing included.")
 
         # Zip the bundled model to download
         shutil.make_archive(deepimagej_model_path, 'zip', deepimagej_model_path)
@@ -314,7 +303,7 @@ class DeepImageJConfig:
         
         def _save_model():
             if tf_version==2:
-                """TODO: change once TF 2.3.0 is available in JAVA"""
+                """TODO: change it once TF 2.3.0 is available in JAVA"""
                 from tensorflow.compat.v1 import saved_model
                 from tensorflow.compat.v1.keras.backend import get_session
             else:
@@ -340,7 +329,7 @@ class DeepImageJConfig:
             _save_model()
         else:
             tf_version = 2
-            """TODO: change once TF 2.3.0 is available in JAVA"""
+            """TODO: change it once TF 2.3.0 is available in JAVA"""
             from tensorflow.keras.models import clone_model
             _weights = tf_model.get_weights(tf_model)
             with tf.Graph().as_default():
@@ -355,13 +344,10 @@ def write_config(Config, TestInfo, config_path):
     - Config:       Class with all the information about the model's architecture and pre/post-processing
     - TestInfo:   Metadata of the image provided as an example
     - config_path:  path to the template of the configuration file. 
-
     It can be downloaded from: 
       https://raw.githubusercontent.com/deepimagej/python4deepimagej/blob/master/xml/config_template.xml
-
     The function updates the fields in the template provided with the
     information about the model and the example image.
-
     """
     urllib.request.urlretrieve("https://raw.githubusercontent.com/deepimagej/python4deepimagej/master/xml/config_template.xml", "config_template.xml")
     try:
