@@ -189,7 +189,7 @@ class DeepImageJConfig:
           null_im   = np.zeros((input_shape[1:])
                                 , dtype=np.float32)
           null_im   = np.expand_dims(null_im, axis=0)
-          min_size  = np.int(self.MinimumSize)
+          min_size  = np.int(self.PatchSize)
 
         point_im = np.zeros_like(null_im)
         min_size = np.int(min_size/2)
