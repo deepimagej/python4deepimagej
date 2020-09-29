@@ -4,4 +4,4 @@ time
 urllib
 shutil
 skimage
-tensorflow<=2.2
+tensorflow<=2.2.1
